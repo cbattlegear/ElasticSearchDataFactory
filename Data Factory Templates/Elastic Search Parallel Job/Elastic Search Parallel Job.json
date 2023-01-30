@@ -1,0 +1,762 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name"
+		},
+		"ElasticSearchHTTP": {
+			"type": "string"
+		},
+		"DataLakeStorage": {
+			"type": "string"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/ElasticSearchTest')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "Set pit_id",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "pit_id",
+							"value": {
+								"value": "@pipeline().parameters.pit_id",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Get First Elastic Search Result",
+						"type": "Copy",
+						"dependsOn": [
+							{
+								"activity": "Set File Count",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set pit_id",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set result size",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set shard_max",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set current_slice",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set parent_run_id",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set json_directory",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "BinarySource",
+								"storeSettings": {
+									"type": "HttpReadSettings",
+									"requestMethod": "POST",
+									"additionalHeaders": "Content-Type: application/json",
+									"requestBody": {
+										"value": "@{json(\n    concat(\n        '{\n          \"slice\": {\n            \"id\": ', variables('current_slice'),',\n            \"max\": ', variables('max_slices'), ',\n          },\n  \"size\": ', variables('result_size'),',\n  \"query\": {\n    \"match_all\": {}\n  },\n  \"pit\": {\n    \"id\": \"', variables('pit_id'), '\",\n    \"keep_alive\": \"5m\"\n  },\n  \"sort\": [\n    {\"@timestamp\": {\"order\": \"asc\", \"format\": \"strict_date_optional_time_nanos\", \"numeric_type\" : \"date_nanos\" }}\n  ],\n  \"track_total_hits\": true\n}'\n    )\n)}",
+										"type": "Expression"
+									},
+									"requestTimeout": ""
+								},
+								"formatSettings": {
+									"type": "BinaryReadSettings"
+								}
+							},
+							"sink": {
+								"type": "BinarySink",
+								"storeSettings": {
+									"type": "AzureBlobFSWriteSettings"
+								}
+							},
+							"enableStaging": false
+						},
+						"inputs": [
+							{
+								"referenceName": "ElasticSearchDirect",
+								"type": "DatasetReference",
+								"parameters": {
+									"elastic_search_url": {
+										"value": "@pipeline().parameters.elastic_search_url",
+										"type": "Expression"
+									}
+								}
+							}
+						],
+						"outputs": [
+							{
+								"referenceName": "ElasticSearchBinaryOutput",
+								"type": "DatasetReference",
+								"parameters": {
+									"foldername": {
+										"value": "@variables('json_directory')",
+										"type": "Expression"
+									},
+									"filename": {
+										"value": "@concat(pipeline().RunId, '-', variables('file_count'), '.json')",
+										"type": "Expression"
+									}
+								}
+							}
+						]
+					},
+					{
+						"name": "Set File Count",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "file_count",
+							"value": "1"
+						}
+					},
+					{
+						"name": "Set result size",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "result_size",
+							"value": {
+								"value": "@pipeline().parameters.result_size",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Set Current Result Count",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "Get Elastic Result data via Function",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "result_count",
+							"value": {
+								"value": "@string(activity('Get Elastic Result data via Function').output.number_of_hits)",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Set pit_id to new pit",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "Get Elastic Result data via Function",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "pit_id",
+							"value": {
+								"value": "@activity('Get Elastic Result data via Function').output.pit_id",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Set next_sort_items",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "Get Elastic Result data via Function",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "next_sort_items",
+							"value": {
+								"value": "@activity('Get Elastic Result data via Function').output.sort",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Until Results are more than Hits",
+						"description": "Run until we have more results (based on size parameter) than total hits (based on total hits in result information)",
+						"type": "Until",
+						"dependsOn": [
+							{
+								"activity": "Set next_sort_items",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set Current Result Count",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "Set pit_id to new pit",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"expression": {
+								"value": "@less(int(variables('result_count')), int(variables('result_size')))",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "Get Next Elastic Search Result",
+									"type": "Copy",
+									"dependsOn": [
+										{
+											"activity": "Set file_count",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"source": {
+											"type": "BinarySource",
+											"storeSettings": {
+												"type": "HttpReadSettings",
+												"requestMethod": "POST",
+												"additionalHeaders": "Content-Type: application/json",
+												"requestBody": {
+													"value": "@{json(\n    concat(\n        '{\n          \"slice\": {\n            \"id\": ', variables('current_slice'),',\n            \"max\": ', variables('max_slices'), ',\n          },\n  \"size\": ', variables('result_size'),',\n  \"query\": {\n    \"match_all\": {}\n  },\n  \"pit\": {\n    \"id\": \"', variables('pit_id'), '\",\n    \"keep_alive\": \"5m\"\n  },\n  \"sort\": [\n    {\"@timestamp\": {\"order\": \"asc\", \"format\": \"strict_date_optional_time_nanos\", \"numeric_type\" : \"date_nanos\" }}\n  ],\n  \"search_after\": ',\n  string(variables('next_sort_items')), ',\n  \"track_total_hits\": false\n}'\n    )\n)}",
+													"type": "Expression"
+												},
+												"requestTimeout": ""
+											},
+											"formatSettings": {
+												"type": "BinaryReadSettings"
+											}
+										},
+										"sink": {
+											"type": "BinarySink",
+											"storeSettings": {
+												"type": "AzureBlobFSWriteSettings"
+											}
+										},
+										"enableStaging": false
+									},
+									"inputs": [
+										{
+											"referenceName": "ElasticSearchDirect",
+											"type": "DatasetReference",
+											"parameters": {
+												"elastic_search_url": {
+													"value": "@pipeline().parameters.elastic_search_url",
+													"type": "Expression"
+												}
+											}
+										}
+									],
+									"outputs": [
+										{
+											"referenceName": "ElasticSearchBinaryOutput",
+											"type": "DatasetReference",
+											"parameters": {
+												"foldername": {
+													"value": "@variables('json_directory')",
+													"type": "Expression"
+												},
+												"filename": {
+													"value": "@concat(pipeline().RunId, '-', variables('file_count'), '.json')",
+													"type": "Expression"
+												}
+											}
+										}
+									]
+								},
+								{
+									"name": "Set file_count",
+									"type": "SetVariable",
+									"dependsOn": [
+										{
+											"activity": "Set file_count holding variable",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "file_count",
+										"value": {
+											"value": "@variables('file_count_hold')",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "Set file_count holding variable",
+									"type": "SetVariable",
+									"dependsOn": [],
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "file_count_hold",
+										"value": {
+											"value": "@string(add(int(variables('file_count')), 1))",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "Set Current Result Count based on hits count",
+									"description": "Use this to determine the number of results returned from ElasticSearch",
+									"type": "SetVariable",
+									"dependsOn": [
+										{
+											"activity": "Get Elastic Result data via Function_Until loop",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "result_count",
+										"value": {
+											"value": "@string(activity('Get Elastic Result data via Function_Until loop').output.number_of_hits)",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "Set pit_id to new pit_until loop",
+									"type": "SetVariable",
+									"dependsOn": [
+										{
+											"activity": "Get Elastic Result data via Function_Until loop",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "pit_id",
+										"value": {
+											"value": "@activity('Get Elastic Result data via Function_Until loop').output.pit_id",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "Set next_sort_items_until loop",
+									"type": "SetVariable",
+									"dependsOn": [
+										{
+											"activity": "Get Elastic Result data via Function_Until loop",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "next_sort_items",
+										"value": {
+											"value": "@activity('Get Elastic Result data via Function_Until loop').output.sort",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "Get Elastic Result data via Function_Until loop",
+									"description": "",
+									"type": "WebActivity",
+									"dependsOn": [
+										{
+											"activity": "Get Next Elastic Search Result",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "0.12:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": true
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"url": "https://elastic-process.azurewebsites.net/api/ElasticSearchResultProcessing",
+										"method": "POST",
+										"headers": {
+											"x-functions-key": {
+												"value": "@activity('KeyVault - Get Azure Function API Key').output.value",
+												"type": "Expression"
+											}
+										},
+										"body": {
+											"test": "hold"
+										},
+										"datasets": [
+											{
+												"referenceName": "ElasticSearchBinaryOutput",
+												"type": "DatasetReference",
+												"parameters": {
+													"foldername": {
+														"value": "@variables('json_directory')",
+														"type": "Expression"
+													},
+													"filename": {
+														"value": "@concat(pipeline().RunId, '-', variables('file_count'), '.json')",
+														"type": "Expression"
+													}
+												}
+											}
+										]
+									}
+								}
+							],
+							"timeout": "0.12:00:00"
+						}
+					},
+					{
+						"name": "Set shard_max",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "max_slices",
+							"value": {
+								"value": "@pipeline().parameters.max_slices",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Set current_slice",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "current_slice",
+							"value": {
+								"value": "@pipeline().parameters.slice_number",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Set parent_run_id",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "parent_run_id",
+							"value": {
+								"value": "@pipeline().parameters.parent_run_id",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Set json_directory",
+						"type": "SetVariable",
+						"dependsOn": [],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "json_directory",
+							"value": {
+								"value": "@pipeline().parameters.json_directory",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "Get Elastic Result data via Function",
+						"description": "",
+						"type": "WebActivity",
+						"dependsOn": [
+							{
+								"activity": "Get First Elastic Search Result",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							},
+							{
+								"activity": "KeyVault - Get Azure Function API Key",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": true
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"url": "https://elastic-process.azurewebsites.net/api/ElasticSearchResultProcessing",
+							"method": "POST",
+							"headers": {
+								"x-functions-key": {
+									"value": "@activity('KeyVault - Get Azure Function API Key').output.value",
+									"type": "Expression"
+								}
+							},
+							"body": {
+								"test": "hold"
+							},
+							"datasets": [
+								{
+									"referenceName": "ElasticSearchBinaryOutput",
+									"type": "DatasetReference",
+									"parameters": {
+										"foldername": {
+											"value": "@variables('json_directory')",
+											"type": "Expression"
+										},
+										"filename": {
+											"value": "@concat(pipeline().RunId, '-', variables('file_count'), '.json')",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "KeyVault - Get Azure Function API Key",
+						"type": "WebActivity",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.12:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": true,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"url": {
+								"value": "@concat(\n    pipeline().parameters.keyvault_url, \n    'secrets/',\n    'AzureFunctionKey',\n    '?api-version=7.3'\n)",
+								"type": "Expression"
+							},
+							"method": "GET",
+							"authentication": {
+								"type": "MSI",
+								"resource": "https://vault.azure.net"
+							}
+						}
+					}
+				],
+				"parameters": {
+					"result_size": {
+						"type": "string"
+					},
+					"max_slices": {
+						"type": "string"
+					},
+					"slice_number": {
+						"type": "string"
+					},
+					"pit_id": {
+						"type": "string"
+					},
+					"parent_run_id": {
+						"type": "string"
+					},
+					"json_directory": {
+						"type": "string"
+					},
+					"elastic_search_url": {
+						"type": "string"
+					},
+					"keyvault_url": {
+						"type": "string"
+					},
+					"azure_function_url": {
+						"type": "string"
+					}
+				},
+				"variables": {
+					"pit_id": {
+						"type": "String"
+					},
+					"file_count": {
+						"type": "String"
+					},
+					"result_size": {
+						"type": "String"
+					},
+					"result_count": {
+						"type": "String"
+					},
+					"next_sort_items": {
+						"type": "Array"
+					},
+					"file_count_hold": {
+						"type": "String"
+					},
+					"slice_array": {
+						"type": "Array"
+					},
+					"number_of_slices": {
+						"type": "String"
+					},
+					"max_slices": {
+						"type": "String"
+					},
+					"current_slice": {
+						"type": "String"
+					},
+					"parent_run_id": {
+						"type": "String"
+					},
+					"json_directory": {
+						"type": "String"
+					},
+					"json_directory_root": {
+						"type": "String"
+					}
+				},
+				"annotations": [],
+				"lastPublishTime": "2023-01-30T15:44:15Z"
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/ElasticSearchDirect')]",
+				"[concat(variables('factoryId'), '/datasets/ElasticSearchBinaryOutput')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ElasticSearchDirect')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('ElasticSearchHTTP')]",
+					"type": "LinkedServiceReference",
+					"parameters": {
+						"elastic_search_url": {
+							"value": "@dataset().elastic_search_url",
+							"type": "Expression"
+						}
+					}
+				},
+				"parameters": {
+					"elastic_search_url": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "Binary",
+				"typeProperties": {
+					"location": {
+						"type": "HttpServerLocation",
+						"relativeUrl": "/_search?pretty"
+					}
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ElasticSearchBinaryOutput')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "[parameters('DataLakeStorage')]",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"foldername": {
+						"type": "string"
+					},
+					"filename": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "Binary",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobFSLocation",
+						"fileName": {
+							"value": "@dataset().filename",
+							"type": "Expression"
+						},
+						"folderPath": {
+							"value": "@dataset().foldername",
+							"type": "Expression"
+						},
+						"fileSystem": "elastictest"
+					}
+				}
+			},
+			"dependsOn": []
+		}
+	]
+}
